@@ -41,19 +41,51 @@ A professional-grade, web-based simulator for the **nexo Retailer Protocol (CASP
 ### 🔧 Raw XML Testing
 Built-in modal to send raw nexo XML directly to the protocol server with template generation for all message types.
 
-## Quick Start
+## Installation
+
+### Prerequisites
+
+- **Node.js 18+** — [Download here](https://nodejs.org/) or install via a package manager:
 
 ```bash
-# Install dependencies
+# macOS (Homebrew)
+brew install node
+
+# Windows (winget)
+winget install OpenJS.NodeJS.LTS
+
+# Ubuntu / Debian
+sudo apt update && sudo apt install nodejs npm
+```
+
+### Setup
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/aryank97531/nexo-casp-simulator.git
+cd nexo-casp-simulator
+
+# 2. Install dependencies
 npm install
 
-# Start the simulator
+# 3. Start the simulator
 npm start
-
-# Open in browser
-# GUI:     http://localhost:3000
-# nexo WS: ws://localhost:9000
 ```
+
+You should see:
+
+```
+  ╔══════════════════════════════════════════════════════╗
+  ║  nexo CASP v8.0 Pinpad Simulator                    ║
+  ║  GUI:      http://localhost:3000                    ║
+  ║  nexo WS:  ws://localhost:9000  (XML protocol)    ║
+  ╚══════════════════════════════════════════════════════╝
+```
+
+### Open in Browser
+
+- **GUI** → [http://localhost:3000](http://localhost:3000)
+- **nexo Protocol WebSocket** → `ws://localhost:9000`
 
 ## Connecting External POS Clients
 
