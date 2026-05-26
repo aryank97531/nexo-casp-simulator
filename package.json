@@ -5,12 +5,12 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.0",
-    "ws": "^8.18.0",
-    "fast-xml-parser": "^4.5.0",
-    "uuid": "^10.0.0"
+    "fast-xml-parser": "^5.8.0",
+    "ws": "^8.21.0"
   }
 }

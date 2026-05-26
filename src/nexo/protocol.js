@@ -3,11 +3,11 @@
  * Builds compliant XML messages for all supported message types
  */
 const { XMLBuilder } = require('fast-xml-parser');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const {
   PROTOCOL_VERSION, MessageFunction, TransactionType, PaymentType,
-  ReconciliationType, CardDataReading, ReversalReason, MessageDestination,
-  InformationQualifier, AttendanceContext, DefaultConfig,
+  ReconciliationType, ReversalReason, MessageDestination,
+  InformationQualifier, DefaultConfig,
 } = require('./constants');
 
 const xmlBuilder = new XMLBuilder({
@@ -20,7 +20,7 @@ function isoDateTime() {
 }
 
 function genExchangeId() {
-  return uuidv4().split('-')[0].toUpperCase();
+  return randomUUID().split('-')[0].toUpperCase();
 }
 
 /** Build a Header41 component */
@@ -77,7 +77,7 @@ function buildPaymentRequest(config, params = {}) {
 
   const msg = {
     SaleToPOISvcReq: {
-      Hdr: buildHeader(MessageFunction.FSPQ, config, exchangeId),
+      Hdr: buildHeader(MessageFunction.SFSQ, config, exchangeId),
       SvcReq: {
         Envt: buildEnvironment(config),
         Cntxt: buildContext(config, params),
@@ -115,7 +115,7 @@ function buildReversalRequest(config, params = {}) {
   const exchangeId = genExchangeId();
   const msg = {
     SaleToPOISvcReq: {
-      Hdr: buildHeader(MessageFunction.FSRQ, config, exchangeId),
+      Hdr: buildHeader(MessageFunction.SFSQ, config, exchangeId),
       SvcReq: {
         Envt: buildEnvironment(config),
         Cntxt: buildContext(config, params),
@@ -146,7 +146,7 @@ function buildBalanceInquiryRequest(config, params = {}) {
   const exchangeId = genExchangeId();
   const msg = {
     SaleToPOISvcReq: {
-      Hdr: buildHeader(MessageFunction.FSIQ, config, exchangeId),
+      Hdr: buildHeader(MessageFunction.SFSQ, config, exchangeId),
       SvcReq: {
         Envt: buildEnvironment(config),
         Cntxt: buildContext(config, params),
@@ -195,7 +195,7 @@ function buildLoginRequest(config, params = {}) {
   const exchangeId = genExchangeId();
   const msg = {
     SaleToPOISsnMgmtReq: {
-      Hdr: buildHeader(MessageFunction.SARQ, config, exchangeId),
+      Hdr: buildHeader(MessageFunction.SASQ, config, exchangeId),
       SsnMgmtReq: {
         Envt: buildEnvironment(config),
         Cntxt: buildContext(config, params),
@@ -225,7 +225,7 @@ function buildLogoutRequest(config, params = {}) {
   const exchangeId = genExchangeId();
   const msg = {
     SaleToPOISsnMgmtReq: {
-      Hdr: buildHeader(MessageFunction.SARQ, config, exchangeId),
+      Hdr: buildHeader(MessageFunction.SASQ, config, exchangeId),
       SsnMgmtReq: {
         Envt: buildEnvironment(config),
         Cntxt: buildContext(config),
@@ -243,7 +243,7 @@ function buildDiagnosisRequest(config, params = {}) {
   const exchangeId = genExchangeId();
   const msg = {
     SaleToPOISsnMgmtReq: {
-      Hdr: buildHeader(MessageFunction.SARQ, config, exchangeId),
+      Hdr: buildHeader(MessageFunction.SASQ, config, exchangeId),
       SsnMgmtReq: {
         Envt: buildEnvironment(config),
         Cntxt: buildContext(config),

@@ -2,13 +2,11 @@
  * nexo CASP v8.0 POI Terminal Response Simulator
  * Generates realistic responses for each request type
  */
-const { v4: uuidv4 } = require('uuid');
 const {
   MessageFunction, ResponseCode, ResponseReason, TransactionType,
-  TransactionTotalsType, ReconciliationType, CardProfiles, DefaultConfig,
-  MessageDestination, InformationQualifier,
+  ReconciliationType, CardProfiles, DefaultConfig,
 } = require('./constants');
-const { buildHeader, isoDateTime, xmlBuilder, genExchangeId } = require('./protocol');
+const { isoDateTime, xmlBuilder, genExchangeId } = require('./protocol');
 
 class POISimulator {
   constructor(config = {}) {
@@ -45,14 +43,18 @@ class POISimulator {
         response = this.handleDiagnosis(requestJson, exchangeId);
         break;
       case MessageFunction.FSPQ:
+        if (!this.loggedIn) return this.handleLoginRequired(msgFunction, exchangeId);
         return this.handlePayment(requestJson, exchangeId);
       case MessageFunction.FSRQ:
+        if (!this.loggedIn) return this.handleLoginRequired(msgFunction, exchangeId);
         response = this.handleReversal(requestJson, exchangeId);
         break;
       case MessageFunction.FSIQ:
+        if (!this.loggedIn) return this.handleLoginRequired(msgFunction, exchangeId);
         response = this.handleBalanceInquiry(requestJson, exchangeId);
         break;
       case MessageFunction.FSCQ:
+        if (!this.loggedIn) return this.handleLoginRequired(msgFunction, exchangeId);
         response = this.handleReconciliation(requestJson, exchangeId);
         break;
       case MessageFunction.SSAB:
@@ -140,6 +142,42 @@ class POISimulator {
     };
     return { xml: xmlBuilder.build(msg), json: msg, msgFunction: MessageFunction.SMDP,
       displayText: 'POI STATUS: OK', status: 'success' };
+  }
+
+  handleLoginRequired(msgFunction, exchangeId) {
+    if (msgFunction === MessageFunction.FSCQ) {
+      const msg = {
+        SaleToPOIRcncltnRspn: {
+          Hdr: this._responseHeader(MessageFunction.FSCP, exchangeId),
+          RcncltnRspn: {
+            RcncltnTp: ReconciliationType.SREC,
+          },
+          Rspn: { Rspn: ResponseCode.FAIL, RspnRsn: ResponseReason.LOGN },
+        },
+      };
+      return { steps: [], response: { xml: xmlBuilder.build(msg), json: msg, msgFunction: MessageFunction.FSCP,
+        displayText: 'LOGIN REQUIRED', status: 'error' } };
+    }
+
+    const responseMap = {
+      [MessageFunction.FSPQ]: MessageFunction.FSPP,
+      [MessageFunction.FSRQ]: MessageFunction.FSRP,
+      [MessageFunction.FSIQ]: MessageFunction.FSIP,
+    };
+    const svcCntt = responseMap[msgFunction] || MessageFunction.FSPP;
+    const msg = {
+      SaleToPOISvcRspn: {
+        Hdr: this._responseHeader(MessageFunction.SFSP, exchangeId),
+        SvcRspn: {
+          Envt: this._responseEnv(),
+          Cntxt: { PmtCntxt: {} },
+          SvcCntt: svcCntt,
+          Rspn: { Rspn: ResponseCode.FAIL, RspnRsn: ResponseReason.LOGN },
+        },
+      },
+    };
+    return { steps: [], response: { xml: xmlBuilder.build(msg), json: msg, msgFunction: svcCntt,
+      displayText: 'LOGIN REQUIRED', status: 'error' } };
   }
 
   // ── PAYMENT (multi-step with device messages) ──
@@ -238,7 +276,7 @@ class POISimulator {
     const amount = this._extractReversalAmount(req) || '0.00';
     const msg = {
       SaleToPOISvcRspn: {
-        Hdr: this._responseHeader(MessageFunction.FSRP, exchangeId),
+        Hdr: this._responseHeader(MessageFunction.SFSP, exchangeId),
         SvcRspn: {
           Envt: this._responseEnv(),
           Cntxt: { PmtCntxt: {} },
@@ -264,7 +302,7 @@ class POISimulator {
     const balance = (Math.random() * 10000).toFixed(2);
     const msg = {
       SaleToPOISvcRspn: {
-        Hdr: this._responseHeader(MessageFunction.FSIP, exchangeId),
+        Hdr: this._responseHeader(MessageFunction.SFSP, exchangeId),
         SvcRspn: {
           Envt: this._responseEnv(),
           Cntxt: { PmtCntxt: {} },
@@ -375,7 +413,7 @@ class POISimulator {
   _buildPaymentResponse(exchangeId, opts) {
     const msg = {
       SaleToPOISvcRspn: {
-        Hdr: this._responseHeader(MessageFunction.FSPP, exchangeId),
+        Hdr: this._responseHeader(MessageFunction.SFSP, exchangeId),
         SvcRspn: {
           Envt: this._responseEnv(),
           Cntxt: { PmtCntxt: { CardDataNtryMd: opts.card.entryMode } },

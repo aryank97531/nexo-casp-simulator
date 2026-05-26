@@ -5,6 +5,7 @@
 const PROTOCOL_VERSION = '8.0';
 
 const MessageFunction = {
+  SFSQ: 'SFSQ', SFSP: 'SFSP',
   FSPQ: 'FSPQ', FSPP: 'FSPP', FSRQ: 'FSRQ', FSRP: 'FSRP',
   FSIQ: 'FSIQ', FSIP: 'FSIP', FSCQ: 'FSCQ', FSCP: 'FSCP',
   FSLQ: 'FSLQ', FSLP: 'FSLP', FSVQ: 'FSVQ', FSVP: 'FSVP',
@@ -14,7 +15,7 @@ const MessageFunction = {
   SMDQ: 'SMDQ', SMDP: 'SMDP', ADAQ: 'ADAQ', ADAP: 'ADAP',
   RPTQ: 'RPTQ', RPTP: 'RPTP', RPAQ: 'RPAQ', RPAP: 'RPAP',
   SSAB: 'SSAB', SSEN: 'SSEN', SSRR: 'SSRR', SSSQ: 'SSSQ', SSSP: 'SSSP',
-  SARQ: 'SARQ', SASP: 'SASP',
+  SASQ: 'SASQ', SASP: 'SASP', SARQ: 'SARQ', SARP: 'SARP',
   DDYQ: 'DDYQ', DDYP: 'DDYP', DINQ: 'DINQ', DINP: 'DINP',
   DPRQ: 'DPRQ', DPRP: 'DPRP', DSIQ: 'DSIQ', DSIP: 'DSIP',
   DCIQ: 'DCIQ', DCIP: 'DCIP', DCOQ: 'DCOQ', DCOP: 'DCOP',
@@ -113,6 +114,7 @@ const DefaultConfig = {
   merchantName: 'Test Merchant Pty Ltd', merchantCategoryCode: '5411',
   merchantCountry: '036', currency: 'AUD', currencyCode: '036', currencyDecimals: 2,
   attendanceContext: AttendanceContext.ATTD, responseDelay: 1500, autoRespond: true,
+  terminalMode: 'auto', physicalTcpHost: '0.0.0.0', physicalTcpPort: 9101,
 };
 
 module.exports = {

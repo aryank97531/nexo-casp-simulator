@@ -27,6 +27,10 @@
         <span class="text">WS :9000</span>
         <span class="client-count" id="nexoClientCount">0</span>
       </div>
+      <div class="connection-badge" id="terminalBadge">
+        <span class="dot"></span>
+        <span class="text" id="terminalModeLabel">TCP virtual</span>
+      </div>
     </div>
     <div class="topbar-right">
       <button class="btn-icon" id="btnRawXml" title="Send Raw XML">
@@ -265,6 +269,17 @@
           <div class="field"><label>Response Delay (ms)</label><input type="number" id="cfgDelay" value="1500" min="0" max="30000"/></div>
           <label class="toggle"><input type="checkbox" id="cfgAutoRespond" checked/><span class="toggle-slider"></span> Auto-Respond</label>
         </div>
+        <div class="config-section">
+          <h4>Terminal Routing</h4>
+          <div class="field">
+            <label>Terminal Mode</label>
+            <select id="cfgTerminalMode">
+              <option value="auto" selected>Auto</option>
+              <option value="virtual">Virtual Only</option>
+              <option value="physical">Physical Preferred</option>
+            </select>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-primary" id="btnSaveConfig">Save</button>
@@ -405,6 +420,49 @@
 const ws = new WebSocket('ws://localhost:9000');
 ws.onopen = () => ws.send(xmlPayload);
 ws.onmessage = (e) => console.log(e.data);</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Physical Terminal Info Modal -->
+  <div class="modal-overlay" id="terminalInfoModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Physical EFTPOS Terminal</h3>
+        <button class="modal-close" id="closeTerminalInfo">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="nexo-info-grid">
+          <div class="nexo-info-item">
+            <label>TCP Listener</label>
+            <code id="terminalEndpoint">0.0.0.0:9101</code>
+          </div>
+          <div class="nexo-info-item">
+            <label>Status</label>
+            <span id="terminalState" class="status-tag">Listening</span>
+          </div>
+          <div class="nexo-info-item">
+            <label>Remote Terminal</label>
+            <span id="terminalRemote">No terminal connected</span>
+          </div>
+          <div class="nexo-info-item">
+            <label>Last Wire Message</label>
+            <span id="terminalLastMessage">None</span>
+          </div>
+          <div class="nexo-info-item">
+            <label>Last Error</label>
+            <span id="terminalLastError">None</span>
+          </div>
+          <div class="nexo-info-item">
+            <label>Framing</label>
+            <span>Raw XML documents</span>
+          </div>
+        </div>
+        <div class="nexo-help">
+          <h4>How to Connect</h4>
+          <p>Configure the physical terminal to open a TCP connection to this machine and port. GUI actions use the virtual simulator until a terminal is connected.</p>
+          <pre class="code-block">PHYSICAL_TCP_HOST=0.0.0.0 PHYSICAL_TCP_PORT=9101 npm start</pre>
         </div>
       </div>
     </div>

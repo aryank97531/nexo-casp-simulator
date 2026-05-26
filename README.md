@@ -13,9 +13,10 @@ A professional-grade, web-based simulator for the **nexo Retailer Protocol (CASP
 - PIN entry simulation with masking
 - Receipt printer output
 
-### 📡 Dual WebSocket Architecture
+### 📡 Dual WebSocket + TCP Architecture
 - **GUI WebSocket** (`:3000`) — Real-time browser UI updates
 - **nexo Protocol WebSocket** (`:9000`) — External POS clients send/receive raw nexo XML
+- **Physical EFTPOS TCP Listener** (`:9101`) — Real terminals can connect to receive Sale-to-POI XML and return real wire responses
 
 ### 📋 Protocol Support
 | Message | Code | Description |
@@ -40,6 +41,9 @@ A professional-grade, web-based simulator for the **nexo Retailer Protocol (CASP
 
 ### 🔧 Raw XML Testing
 Built-in modal to send raw nexo XML directly to the protocol server with template generation for all message types.
+
+### 🧾 Wire-Exact Message Inspector
+The message inspector stores and copies the exact XML payload sent or received on the active wire. The modal displays raw XML text without syntax-highlighting `<span class="...">` markup, so copied payloads are safe to replay.
 
 ## Installation
 
@@ -79,6 +83,7 @@ You should see:
   ║  nexo CASP v8.0 Pinpad Simulator                    ║
   ║  GUI:      http://localhost:3000                    ║
   ║  nexo WS:  ws://localhost:9000  (XML protocol)    ║
+  ║  EFTPOS TCP: 0.0.0.0:9101                         ║
   ╚══════════════════════════════════════════════════════╝
 ```
 
@@ -86,6 +91,20 @@ You should see:
 
 - **GUI** → [http://localhost:3000](http://localhost:3000)
 - **nexo Protocol WebSocket** → `ws://localhost:9000`
+- **Physical EFTPOS TCP listener** → `0.0.0.0:9101`
+
+## Connecting a Physical EFTPOS Terminal
+
+The simulator can act as the Sale/POS side for a terminal that opens a raw TCP connection into this app.
+
+```bash
+# Optional listener override
+PHYSICAL_TCP_HOST=0.0.0.0 PHYSICAL_TCP_PORT=9101 npm start
+```
+
+Configure the terminal to connect to this machine's IP address and the TCP port above. Messages are framed as complete raw XML documents with `SaleToPOI*` root elements; no newline or length prefix is added. In **Auto** terminal mode, GUI actions use the physical terminal while it is connected and automatically fall back to the virtual simulator when it is not.
+
+Use a trusted local network for physical terminal testing. The TCP listener is intended for lab/QA environments and does not perform terminal authentication.
 
 ## Connecting External POS Clients
 
@@ -95,7 +114,7 @@ npx wscat -c ws://localhost:9000
 
 # Send a login request
 <SaleToPOISsnMgmtReq>
-  <Hdr><MsgFctn>SARQ</MsgFctn><PrtcolVrsn>8.0</PrtcolVrsn>...</Hdr>
+  <Hdr><MsgFctn>SASQ</MsgFctn><PrtcolVrsn>8.0</PrtcolVrsn>...</Hdr>
   <SsnMgmtReq><SvcCntt>SMIQ</SvcCntt>...</SsnMgmtReq>
 </SaleToPOISsnMgmtReq>
 ```
@@ -117,6 +136,8 @@ ws.onmessage = (e) => console.log(e.data); // XML response
 │   │   ├── protocol.js        # XML message builder
 │   │   ├── simulator.js       # POI terminal response engine
 │   │   └── validator.js       # Message validation
+│   ├── physical-terminal-bridge.js # TCP listener for physical EFTPOS terminals
+│   ├── xml-wire.js            # Raw XML framing/parsing helpers
 │   ├── nexo-ws-server.js      # External nexo protocol WS server
 │   └── store.js               # In-memory transaction store
 ├── public/
@@ -134,6 +155,7 @@ Access via the **Config** button in the GUI:
 - **Country Code** — ISO country code
 - **Response Delay** — Simulated processing time (ms)
 - **Auto-Respond** — Toggle automatic POI responses
+- **Terminal Mode** — Auto, virtual-only, or physical-preferred routing
 
 ## Card Profiles
 

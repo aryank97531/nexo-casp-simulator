@@ -15,7 +15,7 @@ class MessageValidator {
     this.warnings = [];
 
     // Common header validation
-    this._validateHeader(json);
+    this._validateHeader(json, msgFunction);
 
     // Message-specific validation
     switch (msgFunction) {
@@ -45,8 +45,9 @@ class MessageValidator {
     };
   }
 
-  _validateHeader(json) {
-    const root = Object.values(json)[0];
+  _validateHeader(json, msgFunction) {
+    const rootKey = Object.keys(json || {})[0];
+    const root = json ? json[rootKey] : null;
     if (!root) { this.errors.push('Empty message'); return; }
 
     const hdr = root.Hdr;
@@ -58,6 +59,31 @@ class MessageValidator {
     if (!hdr.CreDtTm) this.errors.push('Header: Missing CreationDateTime (CreDtTm)');
     if (!hdr.InitgPty) this.errors.push('Header: Missing InitiatingParty (InitgPty)');
     if (!hdr.RcptPty) this.warnings.push('Header: Missing RecipientParty (RcptPty)');
+
+    const expected = this._expectedHeaderFunction(rootKey, msgFunction);
+    if (expected && hdr.MsgFctn && !expected.includes(hdr.MsgFctn)) {
+      this.errors.push(`Header: MessageFunction ${hdr.MsgFctn} is invalid for ${rootKey}; expected ${expected.join(' or ')}`);
+    }
+  }
+
+  _expectedHeaderFunction(rootKey, msgFunction) {
+    const map = {
+      SaleToPOISvcReq: ['SFSQ'],
+      SaleToPOISvcRspn: ['SFSP'],
+      SaleToPOISsnMgmtReq: ['SASQ'],
+      SaleToPOISsnMgmtRspn: ['SASP'],
+      SaleToPOIRcncltnReq: ['FSCQ'],
+      SaleToPOIRcncltnRspn: ['FSCP'],
+      SaleToPOIAbrt: ['SSAB'],
+      SaleToPOIMsgStsReq: ['SSSQ'],
+      SaleToPOIMsgStsRspn: ['SSSP'],
+      SaleToPOIMsgRjctn: ['SSRR'],
+    };
+
+    if (rootKey === 'SaleToPOIDvcReq' || rootKey === 'SaleToPOIDvcRspn') {
+      return msgFunction ? [msgFunction] : null;
+    }
+    return map[rootKey] || null;
   }
 
   _validatePaymentRequest(json) {
@@ -93,8 +119,15 @@ class MessageValidator {
     const req = json?.SaleToPOISsnMgmtReq?.SsnMgmtReq;
     if (!req) { this.errors.push('Missing SessionManagementRequest'); return; }
     if (!req.SvcCntt) this.errors.push('SessionManagement: Missing ServiceContent');
+    else if (req.SvcCntt !== msgFunction) this.errors.push(`SessionManagement: ServiceContent must be ${msgFunction}`);
     if (msgFunction === MessageFunction.SMIQ && !req.LgnReq) {
       this.errors.push('Login: Missing LoginRequest (LgnReq)');
+    }
+    if (msgFunction === MessageFunction.SMOQ && !req.LgotReq) {
+      this.errors.push('Logout: Missing LogoutRequest (LgotReq)');
+    }
+    if (msgFunction === MessageFunction.SMDQ && !req.DgnssReq) {
+      this.errors.push('Diagnosis: Missing DiagnosisRequest (DgnssReq)');
     }
   }
 

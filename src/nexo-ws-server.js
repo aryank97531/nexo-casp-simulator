@@ -8,23 +8,18 @@
  * Listens on a configurable port (default 9000), separate from the GUI.
  * All traffic is forwarded to the GUI clients for real-time inspection.
  */
-const { WebSocketServer, WebSocket } = require('ws');
-const { XMLParser, XMLBuilder } = require('fast-xml-parser');
+const { WebSocketServer } = require('ws');
 const {
   MessageFunction, ServiceContentNames, DefaultConfig, PROTOCOL_VERSION,
 } = require('./nexo/constants');
-const { POISimulator } = require('./nexo/simulator');
 const { MessageValidator } = require('./nexo/validator');
 const { isoDateTime, genExchangeId, xmlBuilder } = require('./nexo/protocol');
-
-// ─── XML parser (incoming messages) ───
-const xmlParser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  allowBooleanAttributes: true,
-  parseTagValue: true,
-  trimValues: true,
-});
+const {
+  parseXml,
+  getRootKey,
+  detectMessageFunction,
+  extractExchangeId,
+} = require('./xml-wire');
 
 class NexoWebSocketServer {
   /**
@@ -162,25 +157,21 @@ class NexoWebSocketServer {
     // 1. Parse XML → JSON
     let parsed;
     try {
-      parsed = xmlParser.parse(rawXml);
+      parsed = parseXml(rawXml);
     } catch (parseErr) {
       throw new Error(`XML parse error: ${parseErr.message}`);
     }
 
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('Empty or invalid XML message');
-    }
-
     // 2. Detect message type from root element
-    const rootKey = Object.keys(parsed)[0];
-    const msgFunction = this._detectMessageFunction(parsed, rootKey);
+    const rootKey = getRootKey(parsed);
+    const msgFunction = detectMessageFunction(parsed, rootKey);
 
     if (!msgFunction) {
       throw new Error(`Cannot determine MessageFunction from root element: ${rootKey}`);
     }
 
     // 3. Extract exchangeId from header
-    const exchangeId = this._extractExchangeId(parsed, rootKey) || genExchangeId();
+    const exchangeId = extractExchangeId(parsed, rootKey) || genExchangeId();
 
     // 4. Validate the incoming message
     const validation = this.validator.validate(msgFunction, parsed);
@@ -291,62 +282,6 @@ class NexoWebSocketServer {
   // ═══════════════════════════════════════════════════
   // Helper Methods
   // ═══════════════════════════════════════════════════
-
-  _detectMessageFunction(parsed, rootKey) {
-    const root = parsed[rootKey];
-    if (!root) return null;
-
-    // 1. Prefer SvcCntt from nested request containers — this gives the
-    //    specific service code (SMIQ, SMOQ, SMDQ, FSPQ, etc.) that the
-    //    simulator routes on, rather than generic header codes like SARQ.
-    const requestContainers = ['SvcReq', 'SsnMgmtReq', 'RcncltnReq', 'AbrtReq', 'MsgStsReq', 'DvcReq'];
-    for (const container of requestContainers) {
-      if (root[container] && root[container].SvcCntt) {
-        return root[container].SvcCntt;
-      }
-    }
-
-    // 2. Check Header MsgFctn as fallback
-    const hdr = root.Hdr;
-    if (hdr && hdr.MsgFctn) {
-      const mf = hdr.MsgFctn;
-      // Map generic session management codes to what the simulator expects
-      // SARQ is a generic wrapper — need to inspect further for Login/Logout/Diagnosis
-      if (mf === 'SARQ') {
-        // Try to detect from presence of LgnReq / LgotReq / DgnssReq
-        const ssn = root.SsnMgmtReq;
-        if (ssn) {
-          if (ssn.LgnReq) return 'SMIQ';
-          if (ssn.LgotReq) return 'SMOQ';
-          if (ssn.DgnssReq) return 'SMDQ';
-        }
-      }
-      return mf;
-    }
-
-    // 3. Fallback: infer from root element name
-    const rootMap = {
-      SaleToPOISvcReq: 'FSPQ',
-      SaleToPOISvcRspn: 'FSPP',
-      SaleToPOIRcncltnReq: 'FSCQ',
-      SaleToPOIRcncltnRspn: 'FSCP',
-      SaleToPOISsnMgmtReq: 'SMIQ', // Default to login for session mgmt
-      SaleToPOISsnMgmtRspn: 'SASP',
-      SaleToPOIAbrt: 'SSAB',
-      SaleToPOIMsgStsReq: 'SSSQ',
-      SaleToPOIMsgStsRspn: 'SSSP',
-      SaleToPOIDvcReq: 'DDYQ',
-      SaleToPOIDvcRspn: 'DDYP',
-      SaleToPOIMsgRjctn: 'SSRR',
-    };
-    return rootMap[rootKey] || null;
-  }
-
-  _extractExchangeId(parsed, rootKey) {
-    try {
-      return parsed[rootKey]?.Hdr?.XchgId || null;
-    } catch { return null; }
-  }
 
   _extractAmountFromParsed(parsed) {
     try {

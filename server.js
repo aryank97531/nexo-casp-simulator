@@ -12,23 +12,30 @@ const { POISimulator } = require('./src/nexo/simulator');
 const { MessageValidator } = require('./src/nexo/validator');
 const { TransactionStore } = require('./src/store');
 const { NexoWebSocketServer } = require('./src/nexo-ws-server');
+const { PhysicalTerminalBridge } = require('./src/physical-terminal-bridge');
 const {
-  DefaultConfig, MessageFunction, ServiceContentNames, CardProfiles,
+  DefaultConfig, MessageFunction, ServiceContentNames, CardProfiles, ResponseCode,
 } = require('./src/nexo/constants');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, verifyClient: verifyWebSocketClient });
 
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Global state
-let config = { ...DefaultConfig };
+let config = {
+  ...DefaultConfig,
+  terminalMode: process.env.TERMINAL_MODE || DefaultConfig.terminalMode,
+  physicalTcpHost: process.env.PHYSICAL_TCP_HOST || DefaultConfig.physicalTcpHost,
+  physicalTcpPort: parseInt(process.env.PHYSICAL_TCP_PORT || DefaultConfig.physicalTcpPort, 10),
+};
 const store = new TransactionStore();
 const simulator = new POISimulator(config);
 const validator = new MessageValidator();
 const guiClients = new Set();
+let terminalWasConnected = false;
 
 // ═══════════════════════════════════════════════════
 // nexo Protocol WebSocket Server (external clients)
@@ -42,6 +49,32 @@ const nexoServer = new NexoWebSocketServer({
   getConfig: () => config,
 });
 nexoServer.start();
+
+// ═══════════════════════════════════════════════════
+// Physical EFTPOS Terminal TCP Bridge
+// ═══════════════════════════════════════════════════
+const terminalBridge = new PhysicalTerminalBridge({
+  host: config.physicalTcpHost,
+  port: config.physicalTcpPort,
+});
+terminalBridge.on('status', (status) => {
+  if (terminalWasConnected && !status.connected) {
+    simulator.loggedIn = false;
+    broadcast({ type: 'loginStateChanged', loggedIn: false });
+  }
+  terminalWasConnected = status.connected;
+  broadcast({ type: 'terminalStatus', status, mode: getActiveTerminalMode() });
+});
+terminalBridge.on('terminalError', (err) => {
+  console.error('[TERMINAL-TCP] Error:', err.message);
+  broadcast({ type: 'terminalError', error: err.message, status: terminalBridge.getStatus() });
+});
+terminalBridge.on('errorStatus', (err) => {
+  console.error('[TERMINAL-TCP] Listener error:', err.message);
+  broadcast({ type: 'terminalError', error: err.message, status: terminalBridge.getStatus() });
+});
+terminalBridge.on('wireMessage', handleTerminalWireMessage);
+terminalBridge.start();
 
 // ═══════════════════════════════════════════════════
 // GUI WebSocket handling
@@ -58,6 +91,8 @@ wss.on('connection', (ws) => {
     cardProfiles: Object.keys(CardProfiles),
     selectedCard: simulator.selectedCard,
     nexoServer: nexoServer.getStatus(),
+    terminal: terminalBridge.getStatus(),
+    activeTerminalMode: getActiveTerminalMode(),
   }));
 
   ws.on('message', async (data) => {
@@ -81,9 +116,10 @@ async function handleWSMessage(ws, msg) {
       await handleSendRequest(ws, msg);
       break;
     case 'updateConfig':
-      config = { ...config, ...msg.config };
+      updateConfig(msg.config || {});
       Object.assign(simulator.config, config);
       broadcast({ type: 'configUpdated', config });
+      broadcast({ type: 'terminalStatus', status: terminalBridge.getStatus(), mode: getActiveTerminalMode() });
       break;
     case 'selectCard':
       simulator.setCard(msg.cardProfile);
@@ -146,46 +182,42 @@ async function handleSendRawXml(ws, msg) {
   });
 }
 
-async function handleSendRequest(ws, msg) {
-  const { action, params = {} } = msg;
-  let request;
-
+function buildRequest(action, params = {}) {
   switch (action) {
     case 'payment':
-      request = protocol.buildPaymentRequest(config, params);
-      break;
+      return protocol.buildPaymentRequest(config, params);
     case 'refund':
-      request = protocol.buildPaymentRequest(config, {
+      return protocol.buildPaymentRequest(config, {
         ...params, transactionType: 'RFND', paymentType: 'RFND',
       });
-      break;
     case 'reversal':
-      request = protocol.buildReversalRequest(config, params);
-      break;
+      return protocol.buildReversalRequest(config, params);
     case 'balanceInquiry':
-      request = protocol.buildBalanceInquiryRequest(config, params);
-      break;
+      return protocol.buildBalanceInquiryRequest(config, params);
     case 'reconciliation':
-      request = protocol.buildReconciliationRequest(config, params);
-      break;
+      return protocol.buildReconciliationRequest(config, params);
     case 'login':
-      request = protocol.buildLoginRequest(config, params);
-      break;
+      return protocol.buildLoginRequest(config, params);
     case 'logout':
-      request = protocol.buildLogoutRequest(config, params);
-      break;
+      return protocol.buildLogoutRequest(config, params);
     case 'diagnosis':
-      request = protocol.buildDiagnosisRequest(config, params);
-      break;
+      return protocol.buildDiagnosisRequest(config, params);
     case 'abort':
-      request = protocol.buildAbortRequest(config, params);
-      break;
+      return protocol.buildAbortRequest(config, params);
     case 'messageStatus':
-      request = protocol.buildMessageStatusRequest(config, params);
-      break;
+      return protocol.buildMessageStatusRequest(config, params);
     default:
-      ws.send(JSON.stringify({ type: 'error', error: `Unknown action: ${action}` }));
-      return;
+      return null;
+  }
+}
+
+async function handleSendRequest(ws, msg) {
+  const { action, params = {} } = msg;
+  const request = buildRequest(action, params);
+
+  if (!request) {
+    ws.send(JSON.stringify({ type: 'error', error: `Unknown action: ${action}` }));
+    return;
   }
 
   const validation = validator.validate(request.msgFunction, request.json);
@@ -198,9 +230,24 @@ async function handleSendRequest(ws, msg) {
     json: request.json,
     validation,
     exchangeId: request.exchangeId,
+    source: shouldUsePhysicalTerminal() ? 'physical' : 'simulator',
   });
 
   broadcast({ type: 'messageLogged', message: reqEntry, direction: 'sale-to-poi' });
+
+  if (shouldUsePhysicalTerminal()) {
+    try {
+      terminalBridge.send(request.xml);
+      broadcast({ type: 'pinpadDisplay', text: 'SENT TO TERMINAL', status: 'info' });
+      return;
+    } catch (err) {
+      broadcast({ type: 'terminalError', error: err.message, status: terminalBridge.getStatus() });
+      if (config.terminalMode === 'physical') {
+        ws.send(JSON.stringify({ type: 'error', error: err.message }));
+        return;
+      }
+    }
+  }
 
   if (config.autoRespond) {
     const result = await simulator.processRequest(
@@ -235,16 +282,19 @@ async function handleSendRequest(ws, msg) {
         name: ServiceContentNames[result.response.msgFunction] || result.response.msgFunction,
         xml: result.response.xml, json: result.response.json,
         exchangeId: request.exchangeId,
+        source: 'simulator',
       });
       broadcast({ type: 'messageLogged', message: rspEntry, direction: 'poi-to-sale' });
       broadcast({ type: 'pinpadDisplay', text: result.response.displayText || '', status: result.response.status || 'info' });
 
-      store.addTransaction({
-        action, amount: params.amount, currency: params.currency || config.currency,
-        status: result.response.status, displayText: result.response.displayText,
-        exchangeId: request.exchangeId, card: simulator.selectedCard.brand,
-      });
-      broadcast({ type: 'transactionLogged', transactions: store.getTransactions(20) });
+      if ([MessageFunction.FSPP, MessageFunction.FSRP, MessageFunction.FSIP, MessageFunction.FSCP].includes(result.response.msgFunction)) {
+        store.addTransaction({
+          action, amount: params.amount, currency: params.currency || config.currency,
+          status: result.response.status, displayText: result.response.displayText,
+          exchangeId: request.exchangeId, card: simulator.selectedCard.brand,
+        });
+        broadcast({ type: 'transactionLogged', transactions: store.getTransactions(20) });
+      }
     }
 
     if (result.receiptStep) {
@@ -323,20 +373,62 @@ async function runScenario(ws, scenario) {
   broadcast({ type: 'scenarioCompleted', scenario });
 }
 
+function handleTerminalWireMessage(message) {
+  const entry = store.addMessage({
+    direction: message.direction,
+    msgFunction: message.msgFunction,
+    name: ServiceContentNames[message.msgFunction] || message.msgFunction,
+    xml: message.xml,
+    json: message.json,
+    validation: message.validation,
+    exchangeId: message.exchangeId,
+    source: 'physical',
+    remoteAddress: message.remoteAddress,
+  });
+
+  broadcast({ type: 'messageLogged', message: entry, direction: message.direction });
+  broadcast({ type: 'terminalWireMessage', message: entry });
+  broadcast({ type: 'pinpadDisplay', text: displayTextForTerminalMessage(message), status: statusForTerminalMessage(message) });
+
+  if (message.msgFunction === MessageFunction.SMIP) {
+    simulator.loggedIn = responseSucceeded(message.json);
+    broadcast({ type: 'loginStateChanged', loggedIn: simulator.loggedIn });
+  } else if (message.msgFunction === MessageFunction.SMOP && responseSucceeded(message.json)) {
+    simulator.loggedIn = false;
+    broadcast({ type: 'loginStateChanged', loggedIn: false });
+  }
+
+  if ([MessageFunction.FSPP, MessageFunction.FSRP, MessageFunction.FSIP].includes(message.msgFunction)) {
+    store.addTransaction({
+      action: actionFromMsgFunction(message.msgFunction),
+      amount: extractAmountFromResponse(message.json),
+      currency: config.currency,
+      status: statusForTerminalMessage(message),
+      displayText: displayTextForTerminalMessage(message),
+      exchangeId: message.exchangeId,
+      card: 'Physical terminal',
+      source: 'physical',
+    });
+    broadcast({ type: 'transactionLogged', transactions: store.getTransactions(20) });
+  }
+}
+
 // ═══════════════════════════════════════════════════
 // REST API
 // ═══════════════════════════════════════════════════
 app.get('/api/config', (req, res) => res.json(config));
 app.post('/api/config', (req, res) => {
-  config = { ...config, ...req.body };
+  updateConfig(req.body || {});
   Object.assign(simulator.config, config);
   broadcast({ type: 'configUpdated', config });
+  broadcast({ type: 'terminalStatus', status: terminalBridge.getStatus(), mode: getActiveTerminalMode() });
   res.json(config);
 });
 app.get('/api/transactions', (req, res) => res.json(store.getTransactions()));
 app.get('/api/messages', (req, res) => res.json(store.getMessages()));
 app.get('/api/cards', (req, res) => res.json(CardProfiles));
 app.get('/api/nexo-server', (req, res) => res.json(nexoServer.getStatus()));
+app.get('/api/terminal', (req, res) => res.json({ ...terminalBridge.getStatus(), mode: getActiveTerminalMode() }));
 
 // ═══════════════════════════════════════════════════
 // Helpers
@@ -349,6 +441,96 @@ function broadcast(data) {
 }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
+function updateConfig(patch) {
+  const allowed = new Set([
+    'saleId', 'poiId', 'merchantName', 'merchantCategoryCode', 'merchantCountry',
+    'responseDelay', 'autoRespond', 'terminalMode', 'physicalTcpHost', 'physicalTcpPort',
+  ]);
+  const next = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (!allowed.has(key)) continue;
+    next[key] = value;
+  }
+  if (next.terminalMode && !['auto', 'virtual', 'physical'].includes(next.terminalMode)) {
+    delete next.terminalMode;
+  }
+  if (next.responseDelay !== undefined) {
+    next.responseDelay = Math.max(0, Math.min(30000, parseInt(next.responseDelay, 10) || 0));
+  }
+  if (next.physicalTcpPort !== undefined) {
+    next.physicalTcpPort = Math.max(1, Math.min(65535, parseInt(next.physicalTcpPort, 10) || config.physicalTcpPort));
+  }
+  config = { ...config, ...next };
+  if (next.physicalTcpHost || next.physicalTcpPort) {
+    terminalBridge.configure({ host: config.physicalTcpHost, port: config.physicalTcpPort });
+  }
+}
+
+function shouldUsePhysicalTerminal() {
+  if (config.terminalMode === 'virtual') return false;
+  if (config.terminalMode === 'physical') return terminalBridge.isConnected();
+  return terminalBridge.isConnected();
+}
+
+function getActiveTerminalMode() {
+  if (config.terminalMode === 'virtual') return 'virtual';
+  if (terminalBridge.isConnected() && config.terminalMode !== 'virtual') return 'physical';
+  return 'virtual';
+}
+
+function responseSucceeded(json) {
+  return findResponse(json)?.Rspn === ResponseCode.SUCC;
+}
+
+function statusForTerminalMessage(message) {
+  const rspn = findResponse(message.json);
+  if (!rspn) return 'info';
+  return rspn.Rspn === ResponseCode.SUCC ? 'success' : 'declined';
+}
+
+function displayTextForTerminalMessage(message) {
+  const rspn = findResponse(message.json);
+  if (message.msgFunction === MessageFunction.SMIP) return rspn?.Rspn === ResponseCode.SUCC ? 'TERMINAL LOGIN OK' : 'TERMINAL LOGIN FAILED';
+  if (message.msgFunction === MessageFunction.SMOP) return rspn?.Rspn === ResponseCode.SUCC ? 'TERMINAL LOGOUT OK' : 'TERMINAL LOGOUT FAILED';
+  if (message.msgFunction === MessageFunction.FSPP) return rspn?.Rspn === ResponseCode.SUCC ? 'TERMINAL APPROVED' : 'TERMINAL DECLINED';
+  return `TERMINAL ${message.msgFunction || 'MESSAGE'}`;
+}
+
+function findResponse(json) {
+  return json?.SaleToPOISvcRspn?.SvcRspn?.Rspn
+    || json?.SaleToPOISsnMgmtRspn?.SsnMgmtRspn?.Rspn
+    || json?.SaleToPOIRcncltnRspn?.Rspn
+    || json?.SaleToPOIMsgStsRspn?.MsgStsRspn?.Rspn
+    || null;
+}
+
+function extractAmountFromResponse(json) {
+  return json?.SaleToPOISvcRspn?.SvcRspn?.PmtRspn?.Tx?.TtlAmt
+    || json?.SaleToPOISvcRspn?.SvcRspn?.RvslRspn?.RvsdAmt
+    || null;
+}
+
+function actionFromMsgFunction(msgFunction) {
+  const map = {
+    [MessageFunction.FSPP]: 'payment',
+    [MessageFunction.FSRP]: 'reversal',
+    [MessageFunction.FSIP]: 'balanceInquiry',
+  };
+  return map[msgFunction] || msgFunction;
+}
+
+function verifyWebSocketClient(info) {
+  const origin = info.origin;
+  if (!origin) return true;
+  try {
+    const originUrl = new URL(origin);
+    const host = info.req.headers.host;
+    return originUrl.host === host || ['localhost', '127.0.0.1', '::1'].includes(originUrl.hostname);
+  } catch {
+    return false;
+  }
+}
+
 // ═══════════════════════════════════════════════════
 // Start
 // ═══════════════════════════════════════════════════
@@ -358,5 +540,6 @@ server.listen(PORT, () => {
   console.log(`  ║  nexo CASP v8.0 Pinpad Simulator                    ║`);
   console.log(`  ║  GUI:      http://localhost:${PORT}                    ║`);
   console.log(`  ║  nexo WS:  ws://localhost:${NEXO_PORT}  (XML protocol)    ║`);
+  console.log(`  ║  EFTPOS TCP: ${config.physicalTcpHost}:${config.physicalTcpPort}                 ║`);
   console.log(`  ╚══════════════════════════════════════════════════════╝\n`);
 });

@@ -388,6 +388,8 @@ body {
 /* ═══ NEXO WS SERVER BADGE ═══ */
 #nexoBadge { cursor: pointer; }
 #nexoBadge.listening { background: rgba(129,140,248,.1); border-color: rgba(129,140,248,.3); color: var(--info); }
+#terminalBadge { cursor: pointer; }
+#terminalBadge.connected { background: rgba(52,211,153,.1); border-color: rgba(52,211,153,.3); color: var(--success); }
 #nexoBadge .client-count {
   background: var(--info); color: #0a0e1a; font-size: .6rem; font-weight: 800;
   width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center;
@@ -398,6 +400,7 @@ body {
   background: rgba(129,140,248,.15); color: var(--info); margin-left: 4px;
 }
 .msg-source.external { background: rgba(251,191,36,.15); color: var(--warning); }
+.msg-source.physical { background: rgba(52,211,153,.15); color: var(--success); }
 
 /* ═══ RAW XML SENDER ═══ */
 .xml-help {
