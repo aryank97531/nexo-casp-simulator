@@ -25,7 +25,10 @@ class PhysicalTerminalBridge extends EventEmitter {
     this.remoteAddress = null;
     this.connectedAt = null;
     this.lastMessageAt = null;
+    this.lastValidMessageAt = null;
+    this.lastInvalidMessageAt = null;
     this.lastError = null;
+    this.messagesReceived = 0;
   }
 
   start() {
@@ -90,7 +93,10 @@ class PhysicalTerminalBridge extends EventEmitter {
       remoteAddress: this.remoteAddress,
       connectedAt: this.connectedAt,
       lastMessageAt: this.lastMessageAt,
+      lastValidMessageAt: this.lastValidMessageAt,
+      lastInvalidMessageAt: this.lastInvalidMessageAt,
       lastError: this.lastError,
+      messagesReceived: this.messagesReceived,
     };
   }
 
@@ -135,6 +141,9 @@ class PhysicalTerminalBridge extends EventEmitter {
         const msgFunction = detectMessageFunction(parsed, rootKey);
         const exchangeId = extractExchangeId(parsed, rootKey);
         const validation = this.validator.validate(msgFunction, parsed);
+        this.messagesReceived += 1;
+        if (validation.valid) this.lastValidMessageAt = this.lastMessageAt;
+        else this.lastInvalidMessageAt = this.lastMessageAt;
         this.emit('wireMessage', {
           direction: 'poi-to-sale',
           xml,
@@ -149,6 +158,7 @@ class PhysicalTerminalBridge extends EventEmitter {
         });
       } catch (err) {
         this.lastError = err.message;
+        this.lastInvalidMessageAt = this.lastMessageAt;
         this.emit('terminalError', err);
       }
     }

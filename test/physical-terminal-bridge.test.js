@@ -28,6 +28,9 @@ test('physical terminal bridge accepts terminal connection, sends XML, and emits
   assert.equal(message.xml, inbound);
   assert.equal(message.msgFunction, 'SMIP');
   assert.equal(message.exchangeId, 'A1');
+  assert.equal(bridge.getStatus().messagesReceived, 1);
+  assert.ok(bridge.getStatus().lastValidMessageAt);
+  assert.equal(bridge.getStatus().lastInvalidMessageAt, null);
 
   client.destroy();
   bridge.stop();

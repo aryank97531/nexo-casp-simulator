@@ -102,7 +102,26 @@ The simulator can act as the Sale/POS side for a terminal that opens a raw TCP c
 PHYSICAL_TCP_HOST=0.0.0.0 PHYSICAL_TCP_PORT=9101 npm start
 ```
 
-Configure the terminal to connect to this machine's IP address and the TCP port above. Messages are framed as complete raw XML documents with `SaleToPOI*` root elements; no newline or length prefix is added. In **Auto** terminal mode, GUI actions use the physical terminal while it is connected and automatically fall back to the virtual simulator when it is not.
+On Windows PowerShell:
+
+```powershell
+$env:PHYSICAL_TCP_HOST="0.0.0.0"; $env:PHYSICAL_TCP_PORT="9101"; npm start
+```
+
+Configure the terminal to connect to this machine's LAN IP address and the TCP port above. Do not use `localhost` on the terminal; `localhost` would point back to the terminal itself. Open the **Physical EFTPOS Terminal** badge in the top bar and copy the **Use This Address** value, for example `10.0.0.23:9101`.
+
+Recommended setup flow:
+
+1. Start the simulator and open [http://localhost:3000](http://localhost:3000).
+2. Click the **TCP listening** / **TCP connected** badge in the top bar.
+3. Set the terminal's POS/ECR host to the simulator machine's LAN IP shown under **Use This Address**.
+4. Set the terminal's POS/ECR port to `9101`, unless you changed `PHYSICAL_TCP_PORT`.
+5. Use raw TCP / socket XML mode on the terminal. Messages are framed as complete raw XML documents with `SaleToPOI*` root elements; no newline or length prefix is added by the simulator.
+6. In the simulator **Configuration** modal, leave **Terminal Mode** on **Auto** or choose **Physical Required**.
+7. When the TCP socket connects, the badge changes to **TCP connected** and the modal shows **Correctly connected**.
+8. Send a Login or Diagnosis request. After the app receives valid nexo XML from the hardware, the badge changes to **TCP verified** and the modal shows **Correct and verified**.
+
+In **Auto** terminal mode, GUI actions use the physical terminal while it is connected and automatically fall back to the virtual simulator when it is not. In **Physical Required** mode, GUI actions require a connected terminal; if none is connected, the app reports the missing physical terminal instead of falling back to the virtual simulator.
 
 Use a trusted local network for physical terminal testing. The TCP listener is intended for lab/QA environments and does not perform terminal authentication.
 

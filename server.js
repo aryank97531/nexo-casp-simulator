@@ -4,6 +4,7 @@
  */
 const express = require('express');
 const http = require('http');
+const os = require('os');
 const { WebSocketServer } = require('ws');
 const path = require('path');
 
@@ -63,15 +64,15 @@ terminalBridge.on('status', (status) => {
     broadcast({ type: 'loginStateChanged', loggedIn: false });
   }
   terminalWasConnected = status.connected;
-  broadcast({ type: 'terminalStatus', status, mode: getActiveTerminalMode() });
+  broadcast({ type: 'terminalStatus', status: getTerminalStatus() });
 });
 terminalBridge.on('terminalError', (err) => {
   console.error('[TERMINAL-TCP] Error:', err.message);
-  broadcast({ type: 'terminalError', error: err.message, status: terminalBridge.getStatus() });
+  broadcast({ type: 'terminalError', error: err.message, status: getTerminalStatus() });
 });
 terminalBridge.on('errorStatus', (err) => {
   console.error('[TERMINAL-TCP] Listener error:', err.message);
-  broadcast({ type: 'terminalError', error: err.message, status: terminalBridge.getStatus() });
+  broadcast({ type: 'terminalError', error: err.message, status: getTerminalStatus() });
 });
 terminalBridge.on('wireMessage', handleTerminalWireMessage);
 terminalBridge.start();
@@ -91,8 +92,7 @@ wss.on('connection', (ws) => {
     cardProfiles: Object.keys(CardProfiles),
     selectedCard: simulator.selectedCard,
     nexoServer: nexoServer.getStatus(),
-    terminal: terminalBridge.getStatus(),
-    activeTerminalMode: getActiveTerminalMode(),
+    terminal: getTerminalStatus(),
   }));
 
   ws.on('message', async (data) => {
@@ -119,7 +119,7 @@ async function handleWSMessage(ws, msg) {
       updateConfig(msg.config || {});
       Object.assign(simulator.config, config);
       broadcast({ type: 'configUpdated', config });
-      broadcast({ type: 'terminalStatus', status: terminalBridge.getStatus(), mode: getActiveTerminalMode() });
+      broadcast({ type: 'terminalStatus', status: getTerminalStatus() });
       break;
     case 'selectCard':
       simulator.setCard(msg.cardProfile);
@@ -220,6 +220,13 @@ async function handleSendRequest(ws, msg) {
     return;
   }
 
+  if (config.terminalMode === 'physical' && !terminalBridge.isConnected()) {
+    const error = 'Physical terminal mode is enabled, but no terminal is connected';
+    broadcast({ type: 'terminalError', error, status: getTerminalStatus() });
+    ws.send(JSON.stringify({ type: 'error', error }));
+    return;
+  }
+
   const validation = validator.validate(request.msgFunction, request.json);
 
   const reqEntry = store.addMessage({
@@ -241,7 +248,7 @@ async function handleSendRequest(ws, msg) {
       broadcast({ type: 'pinpadDisplay', text: 'SENT TO TERMINAL', status: 'info' });
       return;
     } catch (err) {
-      broadcast({ type: 'terminalError', error: err.message, status: terminalBridge.getStatus() });
+      broadcast({ type: 'terminalError', error: err.message, status: getTerminalStatus() });
       if (config.terminalMode === 'physical') {
         ws.send(JSON.stringify({ type: 'error', error: err.message }));
         return;
@@ -421,14 +428,14 @@ app.post('/api/config', (req, res) => {
   updateConfig(req.body || {});
   Object.assign(simulator.config, config);
   broadcast({ type: 'configUpdated', config });
-  broadcast({ type: 'terminalStatus', status: terminalBridge.getStatus(), mode: getActiveTerminalMode() });
+  broadcast({ type: 'terminalStatus', status: getTerminalStatus() });
   res.json(config);
 });
 app.get('/api/transactions', (req, res) => res.json(store.getTransactions()));
 app.get('/api/messages', (req, res) => res.json(store.getMessages()));
 app.get('/api/cards', (req, res) => res.json(CardProfiles));
 app.get('/api/nexo-server', (req, res) => res.json(nexoServer.getStatus()));
-app.get('/api/terminal', (req, res) => res.json({ ...terminalBridge.getStatus(), mode: getActiveTerminalMode() }));
+app.get('/api/terminal', (req, res) => res.json(getTerminalStatus()));
 
 // ═══════════════════════════════════════════════════
 // Helpers
@@ -440,6 +447,61 @@ function broadcast(data) {
   }
 }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function getTerminalStatus() {
+  const status = terminalBridge.getStatus();
+  const localAddresses = getLocalIpv4Addresses();
+  const advertisedHost = status.host === '0.0.0.0'
+    ? localAddresses[0] || 'localhost'
+    : status.host;
+  const connected = Boolean(status.connected);
+  const verified = connected && Boolean(status.lastValidMessageAt);
+  const configuredCorrectly = connected && !status.lastError;
+  let configurationState = 'stopped';
+  let configurationMessage = 'TCP listener is stopped.';
+
+  if (status.lastError) {
+    configurationState = 'error';
+    configurationMessage = `Check terminal setup: ${status.lastError}`;
+  } else if (verified) {
+    configurationState = 'verified';
+    configurationMessage = 'Physical terminal is connected and sending valid nexo XML.';
+  } else if (connected) {
+    configurationState = 'connected';
+    configurationMessage = 'Physical terminal is connected correctly. Send a Login or Diagnosis request to verify XML.';
+  } else if (status.running) {
+    configurationState = 'listening';
+    configurationMessage = `Listening for a terminal at ${advertisedHost}:${status.port}.`;
+  }
+
+  return {
+    ...status,
+    mode: getActiveTerminalMode(),
+    localAddresses,
+    advertisedHost,
+    advertisedEndpoint: `${advertisedHost}:${status.port}`,
+    configuredCorrectly,
+    verified,
+    configurationState,
+    configurationMessage,
+  };
+}
+
+function getLocalIpv4Addresses() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((netInfo) => netInfo && netInfo.family === 'IPv4' && !netInfo.internal)
+    .map((netInfo) => netInfo.address)
+    .sort((a, b) => addressPriority(a) - addressPriority(b));
+}
+
+function addressPriority(address) {
+  if (/^192\.168\./.test(address)) return 0;
+  if (/^10\./.test(address)) return 1;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(address)) return 2;
+  if (/^100\.(6[4-9]|[78]\d|9\d|1[01]\d|12[0-7])\./.test(address)) return 4;
+  return 3;
+}
 
 function updateConfig(patch) {
   const allowed = new Set([

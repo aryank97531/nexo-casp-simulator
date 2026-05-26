@@ -19,6 +19,10 @@
     terminalBadge: $('#terminalBadge'),
     terminalModeLabel: $('#terminalModeLabel'),
     terminalEndpoint: $('#terminalEndpoint'),
+    terminalAdvertisedEndpoint: $('#terminalAdvertisedEndpoint'),
+    terminalConfigCheck: $('#terminalConfigCheck'),
+    terminalConfigMessage: $('#terminalConfigMessage'),
+    terminalLocalAddresses: $('#terminalLocalAddresses'),
     terminalRemote: $('#terminalRemote'),
     terminalState: $('#terminalState'),
     terminalLastMessage: $('#terminalLastMessage'),
@@ -87,7 +91,7 @@
         loggedIn = msg.loggedIn;
         updateLoginState();
         if (msg.nexoServer) updateNexoServerStatus(msg.nexoServer);
-        if (msg.terminal) updateTerminalStatus(msg.terminal, msg.activeTerminalMode);
+        if (msg.terminal) updateTerminalStatus(msg.terminal);
         break;
       case 'messageLogged':
         addMessageEntry(msg.message, msg.direction);
@@ -140,10 +144,10 @@
         showRawXmlResponse(msg.xml);
         break;
       case 'terminalStatus':
-        updateTerminalStatus(msg.status, msg.mode);
+        updateTerminalStatus(msg.status);
         break;
       case 'terminalError':
-        updateTerminalStatus(msg.status, msg.mode);
+        updateTerminalStatus(msg.status);
         updatePinpadScreen(`TERMINAL ERROR: ${msg.error}`, 'error');
         break;
     }
@@ -391,6 +395,8 @@
           responseDelay: parseInt($('#cfgDelay').value, 10) || 1500,
           autoRespond: $('#cfgAutoRespond').checked,
           terminalMode: $('#cfgTerminalMode').value,
+          physicalTcpHost: $('#cfgPhysicalTcpHost').value,
+          physicalTcpPort: parseInt($('#cfgPhysicalTcpPort').value, 10) || 9101,
         },
       });
       $('#configModal').classList.remove('open');
@@ -449,21 +455,71 @@
     if (modal) modal.textContent = count;
   }
 
-  function updateTerminalStatus(status = {}, activeMode) {
+  function updateTerminalStatus(status = {}) {
     const connected = Boolean(status.connected);
+    const verified = Boolean(status.verified);
+    const state = status.configurationState || (connected ? 'connected' : status.running ? 'listening' : 'stopped');
     els.terminalBadge.classList.toggle('connected', connected);
-    els.terminalModeLabel.textContent = connected ? 'TCP Live' : `TCP ${activeMode || 'virtual'}`;
+    els.terminalBadge.classList.toggle('verified', verified);
+    els.terminalModeLabel.textContent = terminalBadgeLabel(state, status.mode);
     els.terminalEndpoint.textContent = `${status.host || config.physicalTcpHost || '0.0.0.0'}:${status.port || config.physicalTcpPort || 9101}`;
+    if (els.terminalAdvertisedEndpoint) {
+      els.terminalAdvertisedEndpoint.textContent = status.advertisedEndpoint || els.terminalEndpoint.textContent;
+    }
     els.terminalRemote.textContent = status.remoteAddress || 'No terminal connected';
-    els.terminalState.textContent = connected ? 'Connected' : status.running ? 'Listening' : 'Stopped';
-    els.terminalState.className = `status-tag ${connected ? 'listening' : status.lastError ? 'error' : ''}`;
+    els.terminalState.textContent = terminalStateLabel(state, status.running);
+    els.terminalState.className = `status-tag ${terminalStateClass(state)}`;
+    if (els.terminalConfigCheck) {
+      els.terminalConfigCheck.textContent = terminalCheckLabel(state);
+      els.terminalConfigCheck.className = `status-tag ${terminalStateClass(state)}`;
+    }
+    if (els.terminalConfigMessage) {
+      els.terminalConfigMessage.textContent = status.configurationMessage || 'Waiting for physical terminal connection.';
+    }
+    if (els.terminalLocalAddresses) {
+      els.terminalLocalAddresses.textContent = Array.isArray(status.localAddresses) && status.localAddresses.length
+        ? status.localAddresses.join(', ')
+        : 'None detected';
+    }
     els.terminalLastMessage.textContent = status.lastMessageAt ? new Date(status.lastMessageAt).toLocaleTimeString('en-AU', { hour12: false }) : 'None';
     const error = $('#terminalLastError');
     if (error) error.textContent = status.lastError || 'None';
   }
 
+  function terminalBadgeLabel(state, mode) {
+    if (state === 'verified') return 'TCP verified';
+    if (state === 'connected') return 'TCP connected';
+    if (state === 'error') return 'TCP error';
+    if (state === 'listening') return 'TCP listening';
+    return `TCP ${mode || 'virtual'}`;
+  }
+
+  function terminalStateLabel(state, running) {
+    if (state === 'verified') return 'Verified';
+    if (state === 'connected') return 'Connected';
+    if (state === 'error') return 'Needs attention';
+    if (state === 'listening') return 'Listening';
+    return running ? 'Listening' : 'Stopped';
+  }
+
+  function terminalCheckLabel(state) {
+    if (state === 'verified') return 'Correct and verified';
+    if (state === 'connected') return 'Correctly connected';
+    if (state === 'error') return 'Check settings';
+    if (state === 'listening') return 'Waiting for terminal';
+    return 'Not listening';
+  }
+
+  function terminalStateClass(state) {
+    if (state === 'verified' || state === 'connected') return 'listening';
+    if (state === 'error') return 'error';
+    return '';
+  }
+
   function syncConfigFields() {
     if ($('#cfgTerminalMode')) $('#cfgTerminalMode').value = config.terminalMode || 'auto';
+    if ($('#cfgPhysicalTcpHost')) $('#cfgPhysicalTcpHost').value = config.physicalTcpHost || '0.0.0.0';
+    if ($('#cfgPhysicalTcpPort')) $('#cfgPhysicalTcpPort').value = config.physicalTcpPort || 9101;
     if ($('#cfgMerchantName')) $('#cfgMerchantName').value = config.merchantName || '';
     if ($('#cfgMCC')) $('#cfgMCC').value = config.merchantCategoryCode || '';
     if ($('#cfgCountry')) $('#cfgCountry').value = config.merchantCountry || '';

@@ -276,9 +276,11 @@
             <select id="cfgTerminalMode">
               <option value="auto" selected>Auto</option>
               <option value="virtual">Virtual Only</option>
-              <option value="physical">Physical Preferred</option>
+              <option value="physical">Physical Required</option>
             </select>
           </div>
+          <div class="field"><label>Physical TCP Host</label><input type="text" id="cfgPhysicalTcpHost" value="0.0.0.0"/></div>
+          <div class="field"><label>Physical TCP Port</label><input type="number" id="cfgPhysicalTcpPort" value="9101" min="1" max="65535"/></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -439,8 +441,16 @@ ws.onmessage = (e) => console.log(e.data);</pre>
             <code id="terminalEndpoint">0.0.0.0:9101</code>
           </div>
           <div class="nexo-info-item">
+            <label>Use This Address</label>
+            <code id="terminalAdvertisedEndpoint">localhost:9101</code>
+          </div>
+          <div class="nexo-info-item">
             <label>Status</label>
             <span id="terminalState" class="status-tag">Listening</span>
+          </div>
+          <div class="nexo-info-item">
+            <label>Configuration Check</label>
+            <span id="terminalConfigCheck" class="status-tag">Waiting for terminal</span>
           </div>
           <div class="nexo-info-item">
             <label>Remote Terminal</label>
@@ -458,10 +468,14 @@ ws.onmessage = (e) => console.log(e.data);</pre>
             <label>Framing</label>
             <span>Raw XML documents</span>
           </div>
+          <div class="nexo-info-item">
+            <label>Local Addresses</label>
+            <span id="terminalLocalAddresses">None detected</span>
+          </div>
         </div>
         <div class="nexo-help">
           <h4>How to Connect</h4>
-          <p>Configure the physical terminal to open a TCP connection to this machine and port. GUI actions use the virtual simulator until a terminal is connected.</p>
+          <p id="terminalConfigMessage">Configure the physical terminal to open a TCP connection to this machine and port. GUI actions use the virtual simulator until a terminal is connected.</p>
           <pre class="code-block">PHYSICAL_TCP_HOST=0.0.0.0 PHYSICAL_TCP_PORT=9101 npm start</pre>
         </div>
       </div>
